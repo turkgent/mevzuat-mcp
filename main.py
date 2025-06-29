@@ -1,13 +1,13 @@
-# main.py (DÜZELTİLMİŞ VERSİYON)
+# main.py (GÜNCELLENMİŞ VERSİYON - on_event kaldırıldı)
 import os
 import json
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.openapi.utils import get_openapi
+from fastapi.openapi.utils import get_openapi # get_openapi fonksiyonunu import edin
 
 # mevzuat_mcp_server.py dosyasından FastMCP uygulamasını içeri aktarıyoruz
-from mevzuat_mcp_server import fastmcp_instance
+from mevzuat_mcp_server import app as mevzuat_mcp_app
 
 # Ana FastAPI uygulamasını oluşturuyoruz
 main_app = FastAPI(
@@ -16,94 +16,48 @@ main_app = FastAPI(
     version="0.1.0"
 )
 
-# FastMCP uygulamasını mount ediyoruz
-main_app.mount("/mcp", fastmcp_instance.http_app)
+# FastMCP uygulamasını ana FastAPI uygulamasına mount ediyoruz
+# Bu satır, FastAPI uygulamasının oluşturulmasından sonra,
+# ancak get_openapi_json fonksiyonundan ÖNCE gelmeli.
+main_app.mount("/fastmcp", mevzuat_mcp_app)
 
 # .well-known/ai-plugin.json dosyasını servis etme
 @main_app.get("/.well-known/ai-plugin.json", include_in_schema=False)
 async def get_ai_plugin_json():
     plugin_manifest_path = os.path.join(os.path.dirname(__file__), ".well-known", "ai-plugin.json")
+    
     if not os.path.exists(plugin_manifest_path):
         raise HTTPException(status_code=404, detail="Plugin manifest not found")
+    
     try:
         with open(plugin_manifest_path, "r", encoding="utf-8") as f:
             return JSONResponse(content=json.load(f))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading plugin manifest: {str(e)}")
 
-# OpenAPI şemasını servis etme - FastMCP endpoint'lerini de dahil eder
+# OpenAPI şemasını servis etme
+# ChatGPT'nin doğru şekilde çalışabilmesi için bu fonksiyonu güncelliyoruz
 @main_app.get("/openapi.json", include_in_schema=False)
 async def get_openapi_json():
-    # Ana uygulamanın temel şemasını al
-    main_openapi = get_openapi(
+    openapi_schema = get_openapi(
         title=main_app.title,
         version=main_app.version,
         description=main_app.description,
-        routes=main_app.routes,
+        routes=main_app.routes, # main_app'in tüm rotalarını (mounted olanlar dahil) kullanır
     )
-    
-    # FastMCP şemasını al
-    fastmcp_openapi = get_openapi(
-        title="FastMCP Tools",
-        version="1.0.0",
-        description="FastMCP tools for Mevzuat API",
-        routes=fastmcp_instance.http_app.routes,
-    )
-    
-    # İki şemayı birleştir
-    if "paths" in fastmcp_openapi:
-        if "paths" not in main_openapi:
-            main_openapi["paths"] = {}
-        
-        # FastMCP path'lerini /mcp prefix'i ile ekle
-        for path, operations in fastmcp_openapi["paths"].items():
-            main_openapi["paths"][f"/mcp{path}"] = operations
-    
-    # Schemas'ları birleştir
-    if "components" in fastmcp_openapi and "schemas" in fastmcp_openapi["components"]:
-        if "components" not in main_openapi:
-            main_openapi["components"] = {}
-        if "schemas" not in main_openapi["components"]:
-            main_openapi["components"]["schemas"] = {}
-        
-        main_openapi["components"]["schemas"].update(fastmcp_openapi["components"]["schemas"])
     
     # Plugin'in doğru URL'yi bilmesi için servers alanını ekliyoruz
-    main_openapi["servers"] = [{"url": "https://mevzuat-mcp-ub26.onrender.com"}]
+    # Render.com URL'nizi buraya yazın
+    openapi_schema["servers"] = [{"url": "https://mevzuat-mcp-ub26.onrender.com"}]
     
-    return JSONResponse(content=main_openapi)
+    return JSONResponse(content=openapi_schema)
 
-# Ana endpoint - FastMCP bilgilerini de göster
+
+# / (kök) yola erişildiğinde basit bir yanıt dön
 @main_app.get("/")
 async def read_root():
-    return {
-        "message": "Mevzuat MCP Gateway is running",
-        "fastmcp_info": {
-            "name": fastmcp_instance.name,
-            "instructions": fastmcp_instance.instructions,
-            "available_tools": len(fastmcp_instance._tools),
-        },
-        "endpoints": {
-            "openapi_schema": "/openapi.json",
-            "ai_plugin_manifest": "/.well-known/ai-plugin.json",
-            "mcp_base": "/mcp/",
-            "mcp_openapi": "/mcp/openapi.json"
-        }
-    }
+    return {"message": "Mevzuat MCP Gateway is running. Access /fastmcp for the main FastMCP application."}
 
-# Startup event - bağlantıları başlat
-@main_app.on_event("startup")
-async def startup_event():
-    print("Mevzuat MCP Gateway started successfully!")
-    print(f"Available FastMCP tools: {list(fastmcp_instance._tools.keys())}")
-
-# Shutdown event - bağlantıları temizle  
-@main_app.on_event("shutdown")
-async def shutdown_event():
-    # mevzuat_client'i import etmek yerine doğrudan erişim
-    try:
-        from mevzuat_mcp_server import mevzuat_client
-        await mevzuat_client.close()
-    except Exception as e:
-        print(f"Error during shutdown: {e}")
-    print("Mevzuat MCP Gateway shutdown complete!")
+# on_event("startup") ve on_event("shutdown") event'leri kaldırıldı
+# Zira 'AttributeError: 'FastMCP' object has no attribute '_tools'' hatasına neden oluyorlardı.
+# Ayrıca, bu event'ler FastAPI'nin yeni versiyonlarında "deprecated" olarak işaretlenmiştir.
