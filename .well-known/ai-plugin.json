@@ -1,0 +1,17 @@
+{
+  "schema_version": "v1",
+  "name_for_human": "Mevzuat GPT Tool",
+  "name_for_model": "mevzuat_gpt_tool",
+  "description_for_human": "Türk mevzuatını arar ve madde içeriklerini getirir.",
+  "description_for_model": "Allows searching Turkish laws and retrieving article contents using Mevzuat Bilgi Sistemi.",
+  "auth": {
+    "type": "none"
+  },
+  "api": {
+    "type": "openapi",
+    "url": "https://mevzuat-mcp-ub26.onrender.com/openapi.json"
+  },
+  "logo_url": "https://mevzuat-mcp-ub26.onrender.com/logo.png",
+  "contact_email": "turkgent@gmail.com",
+  "legal_info_url": "https://mevzuat.gov.tr"
+}
