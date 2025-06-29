@@ -1,4 +1,4 @@
-# main.py
+# main.py (GÜNCELLENMİŞ VERSİYON)
 import os
 import json
 from fastapi import FastAPI, Request, HTTPException
@@ -16,14 +16,18 @@ main_app = FastAPI(
     version="0.1.0"
 )
 
+# FastMCP uygulamasını ana FastAPI uygulamasına mount ediyoruz
+# Bu kısmı get_openapi_json fonksiyonundan ÖNCEye taşıdık
+main_app.mount("/fastmcp", mevzuat_mcp_app)
+
 # .well-known/ai-plugin.json dosyasını servis etme
 @main_app.get("/.well-known/ai-plugin.json", include_in_schema=False)
 async def get_ai_plugin_json():
     plugin_manifest_path = os.path.join(os.path.dirname(__file__), ".well-known", "ai-plugin.json")
-    
+
     if not os.path.exists(plugin_manifest_path):
         raise HTTPException(status_code=404, detail="Plugin manifest not found")
-    
+
     try:
         with open(plugin_manifest_path, "r", encoding="utf-8") as f:
             return JSONResponse(content=json.load(f))
@@ -40,20 +44,15 @@ async def get_openapi_json():
         title=main_app.title,
         version=main_app.version,
         description=main_app.description,
-        routes=main_app.routes,
+        routes=main_app.routes, # main_app'in tüm rotalarını (mounted olanlar dahil) kullanır
     )
-    
+
     # Plugin'in doğru URL'yi bilmesi için servers alanını ekliyoruz
     # Render.com URL'nizi buraya yazın
     openapi_schema["servers"] = [{"url": "https://mevzuat-mcp-ub26.onrender.com"}]
-    
+
     return JSONResponse(content=openapi_schema)
 
-
-# FastMCP uygulamasını ana FastAPI uygulamasına mount ediyoruz
-# FastMCP uygulaması artık '/fastmcp' prefix'i altında çalışacak.
-# Yani, ChatGPT'nin araçlarını çağırırken isteği https://mevzuat-mcp-ub26.onrender.com/fastmcp/tools adresine gönderecek.
-main_app.mount("/fastmcp", mevzuat_mcp_app)
 
 # / (kök) yola erişildiğinde basit bir yanıt dön
 @main_app.get("/")
