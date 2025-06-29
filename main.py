@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.utils import get_openapi
 
 # mevzuat_mcp_server.py dosyasından FastMCP uygulamasını içeri aktarıyoruz
-from mevzuat_mcp_server import app as mevzuat_mcp_app, fastmcp_instance
+from mevzuat_mcp_server import fastmcp_instance
 
 # Ana FastAPI uygulamasını oluşturuyoruz
 main_app = FastAPI(
@@ -16,9 +16,8 @@ main_app = FastAPI(
     version="0.1.0"
 )
 
-# FastMCP uygulamasını doğrudan ana uygulamaya dahil ediyoruz (mount etmek yerine)
-# Bu sayede tüm endpoint'ler ana seviyede görünür olacak
-main_app.include_router(mevzuat_mcp_app.router)
+# FastMCP uygulamasını mount ediyoruz
+main_app.mount("/mcp", fastmcp_instance.http_app)
 
 # .well-known/ai-plugin.json dosyasını servis etme
 @main_app.get("/.well-known/ai-plugin.json", include_in_schema=False)
@@ -35,18 +34,44 @@ async def get_ai_plugin_json():
 # OpenAPI şemasını servis etme - FastMCP endpoint'lerini de dahil eder
 @main_app.get("/openapi.json", include_in_schema=False)
 async def get_openapi_json():
-    # Ana uygulamanın OpenAPI şemasını al (FastMCP endpoint'leri dahil)
-    openapi_schema = get_openapi(
+    # Ana uygulamanın temel şemasını al
+    main_openapi = get_openapi(
         title=main_app.title,
         version=main_app.version,
         description=main_app.description,
         routes=main_app.routes,
     )
     
-    # Plugin'in doğru URL'yi bilmesi için servers alanını ekliyoruz
-    openapi_schema["servers"] = [{"url": "https://mevzuat-mcp-ub26.onrender.com"}]
+    # FastMCP şemasını al
+    fastmcp_openapi = get_openapi(
+        title="FastMCP Tools",
+        version="1.0.0",
+        description="FastMCP tools for Mevzuat API",
+        routes=fastmcp_instance.http_app.routes,
+    )
     
-    return JSONResponse(content=openapi_schema)
+    # İki şemayı birleştir
+    if "paths" in fastmcp_openapi:
+        if "paths" not in main_openapi:
+            main_openapi["paths"] = {}
+        
+        # FastMCP path'lerini /mcp prefix'i ile ekle
+        for path, operations in fastmcp_openapi["paths"].items():
+            main_openapi["paths"][f"/mcp{path}"] = operations
+    
+    # Schemas'ları birleştir
+    if "components" in fastmcp_openapi and "schemas" in fastmcp_openapi["components"]:
+        if "components" not in main_openapi:
+            main_openapi["components"] = {}
+        if "schemas" not in main_openapi["components"]:
+            main_openapi["components"]["schemas"] = {}
+        
+        main_openapi["components"]["schemas"].update(fastmcp_openapi["components"]["schemas"])
+    
+    # Plugin'in doğru URL'yi bilmesi için servers alanını ekliyoruz
+    main_openapi["servers"] = [{"url": "https://mevzuat-mcp-ub26.onrender.com"}]
+    
+    return JSONResponse(content=main_openapi)
 
 # Ana endpoint - FastMCP bilgilerini de göster
 @main_app.get("/")
@@ -61,8 +86,8 @@ async def read_root():
         "endpoints": {
             "openapi_schema": "/openapi.json",
             "ai_plugin_manifest": "/.well-known/ai-plugin.json",
-            "mcp_tools": "/mcp/tools",
-            "mcp_call_tool": "/mcp/call_tool"
+            "mcp_base": "/mcp/",
+            "mcp_openapi": "/mcp/openapi.json"
         }
     }
 
@@ -75,6 +100,10 @@ async def startup_event():
 # Shutdown event - bağlantıları temizle  
 @main_app.on_event("shutdown")
 async def shutdown_event():
-    from mevzuat_mcp_server import mevzuat_client
-    await mevzuat_client.close()
+    # mevzuat_client'i import etmek yerine doğrudan erişim
+    try:
+        from mevzuat_mcp_server import mevzuat_client
+        await mevzuat_client.close()
+    except Exception as e:
+        print(f"Error during shutdown: {e}")
     print("Mevzuat MCP Gateway shutdown complete!")
