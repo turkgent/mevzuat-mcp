@@ -6,6 +6,9 @@ import json
 from pydantic import Field
 from typing import Optional, List, Dict, Any, Union
 
+from fastapi import FastAPI, Request, HTTPException # FastAPI'yi import ediyoruz!
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles # Statik dosyalar için
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
@@ -36,42 +39,49 @@ fastmcp_instance = FastMCP(
     dependencies=["httpx", "beautifulsoup4", "lxml", "markitdown", "pypdf"]
 )
 
-# ASGI sunucusu için app
-app = fastmcp_instance.http_app
-
 # ========================================================================
-# ÖNEMLİ EKLENTİLER: ai-plugin.json ve openapi.json dosyalarını sunmak için endpoint'ler
-# Bu, ChatGPT'nin plugin'inizi ve API şemanızı keşfetmesini sağlar.
-# ========================================================================
+# ÖNEMLİ DEĞİŞİKLİKLER BURADAN BAŞLIYOR
+# Ana FastAPI uygulamasını oluşturuyoruz
+app = FastAPI(
+    title="MevzuatGovTr MCP Gateway",
+    description="Gateway for MevzuatGovTrMCP FastMCP server, serving plugin manifests and OpenAPI schema.",
+    version="0.1.0"
+)
 
-# .well-known/ai-plugin.json dosyasını FastAPI üzerinden servis etme
+# FastMCP uygulamasını ana FastAPI uygulamasının altına mount ediyoruz.
+# FastMCP kendi yollarını /fastmcp altında servis edecek.
+# Örneğin, /fastmcp/openapi.json veya /fastmcp/tools
+app.mount("/fastmcp", fastmcp_instance.http_app)
+
+# ai-plugin.json dosyasını FastAPI üzerinden servis etme
+# Bu dosya, .well-known/ dizininde bulunur.
 @app.get("/.well-known/ai-plugin.json", include_in_schema=False)
 async def get_ai_plugin_json():
+    # Mevcut dosya yolunu kullanarak .well-known klasörüne erişim
     plugin_manifest_path = os.path.join(os.path.dirname(__file__), ".well-known", "ai-plugin.json")
     if not os.path.exists(plugin_manifest_path):
         logger.error(f"ai-plugin.json not found at {plugin_manifest_path}")
-        # Hata durumunda 404 döndür, ancak sorun yaratmaması için geçerli bir JSON objesiyle
-        return {"error": "Plugin manifest not found", "detail": f"Path: {plugin_manifest_path}"}, 404
+        raise HTTPException(status_code=404, detail="Plugin manifest not found")
+    
     try:
         with open(plugin_manifest_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            return JSONResponse(content=json.load(f))
     except Exception as e:
         logger.exception(f"Error reading ai-plugin.json: {e}")
-        return {"error": "Error reading plugin manifest", "detail": str(e)}, 500
+        raise HTTPException(status_code=500, detail=f"Error reading plugin manifest: {str(e)}")
 
-# openapi.json dosyasını FastAPI üzerinden servis etme
-# FastMCP'nin kendisi OpenAPI şemasını FastMCP.http_app.openapi() üzerinden sağlar.
-# Bu endpoint, GPT'nin doğrudan alabileceği bir yol sağlar.
+# OpenAPI şemasını FastAPI üzerinden servis etme
+# Bu, FastMCP'nin kendi şemasını döndürecektir.
+# ChatGPT'ye vereceğimiz URL bu olacak: https://mevzuat-mcp-ub26.onrender.com/openapi.json
 @app.get("/openapi.json", include_in_schema=False)
 async def get_openapi_json():
     # FastMCP'nin dahili FastAPI uygulamasının otomatik oluşturduğu OpenAPI şemasını döndür
-    return app.openapi()
-
+    # FastMCP'nin kendisi bu metodu 'http_app' üzerinden sunar
+    return fastmcp_instance.http_app.openapi() # Burası önemli düzeltme!
 
 # ========================================================================
-# EKLENTİLER BURADA SONA ERİYOR
+# DEĞİŞİKLİKLER BURADA SONA ERİYOR
 # ========================================================================
-
 
 # Mevzuat API istemcisi
 mevzuat_client = MevzuatApiClient()
