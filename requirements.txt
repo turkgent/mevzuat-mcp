@@ -5,3 +5,5 @@ beautifulsoup4
 lxml
 markitdown
 beautifulsoup4
+fastapi
+uvicorn
